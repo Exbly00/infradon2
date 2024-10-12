@@ -5,6 +5,7 @@ interface Props {
   name: string
   content: string
   storage?: PouchDB.Database<{}>
+  posts?: PouchDB.Core.AllDocsResponse<Post>
 }
 
 interface Post {
@@ -22,7 +23,8 @@ export default {
   data(): Props {
     return {
       name: '',
-      content: ''
+      content: '',
+      posts: undefined
     }
   },
   methods: {
@@ -35,7 +37,13 @@ export default {
       }
       this.storage = db
     },
-    createPost(e: SubmitEvent) {
+    getPosts() {
+      this.storage?.allDocs<Post>({ include_docs: true, attachments: true }).then((response) => {
+        this.posts = response
+      })
+    },
+    async createPost(e: Event) {
+      // Prevent the browser from reloading the page
       e.preventDefault()
       e.stopPropagation()
 
@@ -50,14 +58,20 @@ export default {
         }
       }
 
-      this.storage?.put(post)
+      this.storage?.put(post).then(() => {
+        // We wait until the `.put` is done to get the posts in order to have the newly
+        // created post.
+        this.getPosts()
+      })
 
+      // Reset form
       this.name = ''
       this.content = ''
     }
   },
   mounted() {
     this.initDatabase()
+    this.getPosts()
   }
 }
 </script>
@@ -74,6 +88,12 @@ export default {
 
     <button>Envoyer</button>
   </form>
+
+  <h1>Posts</h1>
+
+  <div v-if="posts" v-for="post in posts.rows">
+    <a :href="'/posts/' + post.doc?._id">{{ post.doc?.doc.post_name }}</a>
+  </div>
 </template>
 
 <style>
