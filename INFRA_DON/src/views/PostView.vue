@@ -84,9 +84,6 @@ export default {
 
       // On utilise la base locale comme source principale
       this.storage = localDB
-
-      // Créer un index au démarrage pour le champ post_name
-      this.createIndex()
     },
 
     // Méthode pour synchroniser manuellement la base locale et distante
