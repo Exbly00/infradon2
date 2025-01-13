@@ -1,56 +1,65 @@
 <script lang="ts">
 import PouchDB from 'pouchdb'
 import PouchDBFind from 'pouchdb-find'
-
-// Activation de pouchdb-find pour permettre la recherche
 PouchDB.plugin(PouchDBFind)
 
+// Définir les types pour les props et les données
 interface Props {
   name: string
   content: string
   searchQuery: string
-  storage?: PouchDB.Database<{}> // Base de données PouchDB (optionnelle)
+  mediaFile: File | null
+  storage?: PouchDB.Database<Post> // Utilisation du type spécifique Post pour la base de données
   posts?: {
     rows: Array<{
       id: string
       key: string
       value: { rev: string }
-      doc: Post // Le type des documents
+      doc: Post
     }>
     total_rows: number
     offset: number
   }
 }
 
+// Définir l'interface pour les posts
 interface Post {
   _id: string
-  _rev?: string // Ajouté pour gérer les suppressions/modifications
-  doc: {
-    post_name: string
-    post_content: string
-    attributes: {
-      creation_date: string
-    }
+  post_name: string
+  post_content: string
+  attributes: {
+    creation_date: string
   }
+  media: any[]
 }
 
+// Exporter le composant
 export default {
   data(): Props {
     return {
       name: '',
       content: '',
       searchQuery: '',
+      mediaFile: null,
       posts: undefined
     }
   },
   methods: {
-    // Méthode pour afficher le prompt et récupérer le contenu modifié
+    // méthode handleFileChange pour gérer le changement de fichier
+    handleFileChange(event: Event) {
+      const target = event.target as HTMLInputElement | null
+      if (target && target.files) {
+        this.mediaFile = target.files[0]
+      }
+    },
+    // méthode promptEdit pour afficher une boîte de dialogue de modification
     promptEdit(content: string): string {
       const newContent = window.prompt('Modifier le contenu du post', content)
-      return newContent ?? '' // Retourne une chaîne vide si l'utilisateur annule
+      return newContent ?? ''
     },
+    //méthode initDatabase pour initialiser la base de données
     initDatabase() {
-      const db = new PouchDB('http://admin:admin@localhost:5984/post')
+      const db = new PouchDB<Post>('http://admin:admin@localhost:5984/post')
       if (db) {
         console.log("Connected to collection 'post'")
       } else {
@@ -58,70 +67,148 @@ export default {
       }
       this.storage = db
 
-      // Créer un index au démarrage
+      // Créer un index au démarrage pour le champ post_name
       this.createIndex()
     },
+    //méthode getPosts pour récupérer les posts
     async getPosts() {
       const response = await this.storage?.allDocs<Post>({ include_docs: true, attachments: true })
 
       if (response) {
         this.posts = {
-          rows: response.rows.map((row) => ({
-            id: row.id,
-            key: row.key,
-            value: { rev: row.value.rev },
-            doc: row.doc as Post
-          })),
+          rows: response.rows.map((row) => {
+            if (row.doc) {
+              if (!row.doc.media) {
+                row.doc.media = []
+              }
+              return {
+                id: row.id,
+                key: row.key,
+                value: { rev: row.value.rev },
+                doc: row.doc as Post
+              }
+            }
+
+            return {
+              id: row.id,
+              key: row.key,
+              value: { rev: row.value.rev },
+              doc: {
+                _id: row.id,
+                post_name: '',
+                post_content: '',
+                attributes: { creation_date: '' },
+                media: []
+              }
+            }
+          }),
           total_rows: response.total_rows,
-          offset: response.offset
+          offset: response.offset ?? 0
         }
       }
     },
+    // méthode createPost pour créer un post
     async createPost(e: Event) {
       e.preventDefault()
       e.stopPropagation()
 
+      const id = Math.random().toString(36).substring(2)
+
       const post: Post = {
-        _id: Math.random().toString(36).substring(2),
-        doc: {
-          post_name: this.name,
-          post_content: this.content,
-          attributes: {
-            creation_date: new Date().toISOString()
-          }
-        }
+        _id: id,
+        post_name: this.name,
+        post_content: this.content,
+        attributes: {
+          creation_date: new Date().toISOString()
+        },
+        media: []
       }
 
-      await this.storage?.put(post)
+      const doc = await this.storage?.put(post)
+
+      if (doc && this.mediaFile) {
+        await this.storage?.putAttachment(
+          id,
+          this.mediaFile.name,
+          doc.rev,
+          this.mediaFile,
+          this.mediaFile.type
+        )
+      }
+
       this.getPosts()
 
-      // Réinitialisation du formulaire
       this.name = ''
       this.content = ''
     },
+    //méthode generateFakeData pour générer des données factices
+    async generateFakeData() {
+      const fakePosts = Array.from({ length: 10 }).map(() => ({
+        _id: Math.random().toString(36).substring(2),
+        post_name: `Post_${Math.random().toString(36).substring(7)}`,
+        post_content: `This is a fake post content for ${new Date().toISOString()}`,
+        attributes: {
+          creation_date: new Date().toISOString()
+        },
+        media: []
+      }))
+
+      try {
+        for (const post of fakePosts) {
+          await this.storage?.put(post)
+        }
+        console.log('Fake data successfully added!')
+        this.getPosts() // Rafraîchir les posts affichés
+      } catch (error) {
+        console.error('Error while adding fake data:', error)
+      }
+    },
+    // méthodes pour gérer les opérations CRUD
+    async uploadMedia(file: File): Promise<string> {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve(URL.createObjectURL(file)), 1000)
+      })
+    },
+    //méthode deletePost pour supprimer un post
     async deletePost(postId: string, rev: string) {
       await this.storage?.remove(postId, rev)
       this.getPosts()
     },
+    //méthode editPost pour modifier un post
     async editPost(postId: string, updatedContent: string) {
       const post = await this.storage?.get<Post>(postId)
       if (post) {
-        post.doc.post_content = updatedContent
+        post.post_content = updatedContent
         await this.storage?.put(post)
         this.getPosts()
       }
     },
+    //méthode createIndex pour créer un index
     async createIndex() {
       await this.storage?.createIndex({
         index: {
-          fields: ['doc.post_name']
+          fields: ['post_name']
         }
       })
       console.log('Index created')
     },
+    //méthode removeMediaFromPost pour supprimer un média d'un post
+    async removeMediaFromPost(postId: string, mediaIndex: number) {
+      const post = await this.storage?.get<Post>(postId)
+
+      if (post) {
+        if (Array.isArray(post.media) && post.media.length > 0) {
+          post.media.splice(mediaIndex, 1)
+
+          await this.storage?.put(post)
+          this.getPosts()
+        }
+      }
+    },
+    //méthode searchPosts pour rechercher des posts
     async searchPosts() {
       const response = await this.storage?.find({
-        selector: { 'doc.post_name': { $regex: this.searchQuery } }
+        selector: { post_name: { $regex: `^.*${this.searchQuery}.*` } }
       })
 
       if (response) {
@@ -137,10 +224,10 @@ export default {
         }
       }
     },
+    //méthode syncDatabase pour synchroniser la base de données
     syncDatabase() {
       const localDB = new PouchDB('local_db')
 
-      // Vérifie si la base de données distante est correctement initialisée
       if (this.storage) {
         PouchDB.replicate(this.storage, localDB, { live: true, retry: true }).on(
           'change',
@@ -153,6 +240,8 @@ export default {
       }
     }
   },
+
+  // Méthode montée pour initialiser la base de données et récupérer les posts
   mounted() {
     this.initDatabase()
     this.getPosts()
@@ -173,8 +262,13 @@ export default {
     <label for="content">Content</label>
     <textarea name="content" id="content" rows="5" v-model="content"></textarea>
 
+    <label for="media">Ajouter un média</label>
+    <input type="file" id="media" @change="handleFileChange" />
+
     <button>Envoyer</button>
   </form>
+
+  <button @click="generateFakeData">Générer des données "fake"</button>
 
   <h2>Recherche</h2>
   <input type="text" v-model="searchQuery" @input="searchPosts" placeholder="Rechercher par nom" />
@@ -183,13 +277,22 @@ export default {
 
   <div v-if="posts && posts.rows.length">
     <div v-for="post in posts.rows" :key="post.id">
-      <a v-if="post.doc?.doc" :href="'/posts/' + post.doc._id">
-        {{ post.doc.doc.post_name }}
+      <a v-if="post.doc?.post_name" :href="'/posts/' + post.doc._id">
+        {{ post.doc.post_name }}
       </a>
-      <p v-if="post.doc?.doc">{{ post.doc.doc.post_content }}</p>
+      <p v-if="post.doc?.post_content">{{ post.doc.post_content }}</p>
+
+      <div v-if="post.doc && post.doc.media && post.doc.media.length > 0">
+        <h3>Médias associés:</h3>
+        <div v-for="(media, index) in post.doc.media" :key="index">
+          <img :src="media" alt="Media" width="100" />
+          <button @click="removeMediaFromPost(post.id, index)">Supprimer le média</button>
+        </div>
+      </div>
+
       <div class="buttons">
         <button @click="deletePost(post.id, post.value.rev)">Supprimer</button>
-        <button @click="editPost(post.id, promptEdit(post.doc.doc.post_content))">Modifier</button>
+        <button @click="editPost(post.id, promptEdit(post.doc.post_content))">Modifier</button>
       </div>
     </div>
   </div>
