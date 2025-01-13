@@ -59,16 +59,53 @@ export default {
     },
     //méthode initDatabase pour initialiser la base de données
     initDatabase() {
-      const db = new PouchDB<Post>('http://admin:admin@localhost:5984/post')
-      if (db) {
-        console.log("Connected to collection 'post'")
+      // Base distante
+      const remoteDB = new PouchDB<Post>('http://admin:admin@localhost:5984/post')
+      if (remoteDB) {
+        console.log("Connected to remote collection 'post'")
       } else {
-        console.warn('Something went wrong')
+        console.warn('Remote database connection failed')
       }
-      this.storage = db
+      this.storage = remoteDB
+
+      // Base locale
+      const localDB = new PouchDB<Post>('local_db')
+      console.log("Initialized local database 'local_db'")
+
+      // Synchronisation live entre la base distante et locale
+      PouchDB.sync(remoteDB, localDB, { live: true, retry: true })
+        .on('change', (info) => {
+          console.log('Sync change detected:', info)
+          this.getPosts() // Actualise les données locales
+        })
+        .on('error', (err) => {
+          console.error('Sync error:', err)
+        })
+
+      // On utilise la base locale comme source principale
+      this.storage = localDB
 
       // Créer un index au démarrage pour le champ post_name
       this.createIndex()
+    },
+
+    // Méthode pour synchroniser manuellement la base locale et distante
+    manualSync() {
+      if (!this.storage) {
+        console.warn('Database is not initialized')
+        return
+      }
+
+      const remoteDB = new PouchDB('http://admin:admin@localhost:5984/post')
+      const localDB = new PouchDB('local_db')
+
+      PouchDB.sync(remoteDB, localDB)
+        .on('complete', () => {
+          console.log('Manual synchronization completed')
+        })
+        .on('error', (err) => {
+          console.error('Manual synchronization failed:', err)
+        })
     },
     //méthode getPosts pour récupérer les posts
     async getPosts() {
@@ -269,6 +306,7 @@ export default {
   </form>
 
   <button @click="generateFakeData">Générer des données "fake"</button>
+  <button @click="manualSync">Synchroniser les bases</button>
 
   <h2>Recherche</h2>
   <input type="text" v-model="searchQuery" @input="searchPosts" placeholder="Rechercher par nom" />
