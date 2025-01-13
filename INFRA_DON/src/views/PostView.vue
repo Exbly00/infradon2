@@ -275,6 +275,29 @@ export default {
       } else {
         console.warn("La base de données distante n'est pas initialisée.")
       }
+    },
+
+    // Méthode pour surveiller les changements en temps réel dans la base locale
+    watchDatabaseChanges() {
+      if (!this.storage) {
+        console.warn("La base de données locale n'est pas initialisée.")
+        return
+      }
+
+      // Écouter les changements sur la base locale
+      this.storage
+        .changes({
+          since: 'now', // Écoute uniquement les nouveaux changements
+          live: true, // Écoute en temps réel
+          include_docs: true // Inclut les documents modifiés dans la réponse
+        })
+        .on('change', (change) => {
+          console.log('Changement détecté dans la base locale :', change)
+          this.getPosts() // Rafraîchir les données locales
+        })
+        .on('error', (err) => {
+          console.error("Erreur lors de l'écoute des changements :", err)
+        })
     }
   },
 
@@ -282,9 +305,23 @@ export default {
   mounted() {
     this.initDatabase()
     this.getPosts()
+    this.watchDatabaseChanges() // Lancer l'écoute des changements
     this.getPosts().catch((err) => {
       console.error('Erreur lors de la récupération des posts:', err)
     })
+  },
+
+  beforeUnmount() {
+    if (this.storage) {
+      this.storage
+        .close()
+        .then(() => {
+          console.log('Base locale fermée proprement.')
+        })
+        .catch((err) => {
+          console.error('Erreur lors de la fermeture de la base locale :', err)
+        })
+    }
   }
 }
 </script>
