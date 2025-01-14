@@ -85,25 +85,6 @@ export default {
       // On utilise la base locale comme source principale
       this.storage = localDB
     },
-
-    // Méthode pour synchroniser manuellement la base locale et distante
-    manualSync() {
-      if (!this.storage) {
-        console.warn('Database is not initialized')
-        return
-      }
-
-      const remoteDB = new PouchDB('http://admin:admin@localhost:5984/post')
-      const localDB = new PouchDB('local_db')
-
-      PouchDB.sync(remoteDB, localDB)
-        .on('complete', () => {
-          console.log('Manual synchronization completed')
-        })
-        .on('error', (err) => {
-          console.error('Manual synchronization failed:', err)
-        })
-    },
     //méthode getPosts pour récupérer les posts
     async getPosts() {
       const response = await this.storage?.allDocs<Post>({ include_docs: true, attachments: true })
@@ -226,15 +207,52 @@ export default {
       })
       console.log('Index created')
     },
-    //méthode removeMediaFromPost pour supprimer un média d'un post
+    // Ajouter un ou plusieurs médias à un document
+    async addMediaToPost(postId: string, files: FileList | null) {
+      if (!files || files.length === 0) {
+        console.warn('Aucun fichier sélectionné pour ajout.')
+        return
+      }
+
+      const post = await this.storage?.get<Post>(postId)
+      if (!post) {
+        console.error("Post introuvable pour l'ajout de médias.")
+        return
+      }
+
+      try {
+        // Ajouter chaque fichier à la liste des médias
+        for (const file of Array.from(files)) {
+          const metadata = {
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            url: await this.uploadMedia(file)
+          }
+          post.media.push(metadata)
+        }
+
+        // Mettre à jour le document avec les nouveaux médias
+        await this.storage?.put(post)
+        console.log('Médias ajoutés avec succès au post :', postId)
+        this.getPosts()
+      } catch (err) {
+        console.error("Erreur lors de l'ajout des médias :", err)
+      }
+    },
+
+    // Supprimer un média spécifique d'un document
     async removeMediaFromPost(postId: string, mediaIndex: number) {
       const post = await this.storage?.get<Post>(postId)
 
       if (post) {
         if (Array.isArray(post.media) && post.media.length > 0) {
+          // Supprime le média à l'index spécifié
           post.media.splice(mediaIndex, 1)
 
+          // Met à jour le post dans la base de données
           await this.storage?.put(post)
+          console.log(`Média supprimé du post : ${postId}`)
           this.getPosts()
         }
       }
@@ -284,13 +302,13 @@ export default {
       // Écouter les changements sur la base locale
       this.storage
         .changes({
-          since: 'now', // Écoute uniquement les nouveaux changements
-          live: true, // Écoute en temps réel
-          include_docs: true // Inclut les documents modifiés dans la réponse
+          since: 'now',
+          live: true,
+          include_docs: true
         })
         .on('change', (change) => {
           console.log('Changement détecté dans la base locale :', change)
-          this.getPosts() // Rafraîchir les données locales
+          this.getPosts()
         })
         .on('error', (err) => {
           console.error("Erreur lors de l'écoute des changements :", err)
@@ -302,7 +320,7 @@ export default {
   mounted() {
     this.initDatabase()
     this.getPosts()
-    this.watchDatabaseChanges() // Lancer l'écoute des changements
+    this.watchDatabaseChanges()
     this.getPosts().catch((err) => {
       console.error('Erreur lors de la récupération des posts:', err)
     })
@@ -340,7 +358,6 @@ export default {
   </form>
 
   <button @click="generateFakeData">Générer des données "fake"</button>
-  <button @click="manualSync">Synchroniser les bases</button>
 
   <h2>Recherche</h2>
   <input type="text" v-model="searchQuery" @input="searchPosts" placeholder="Rechercher par nom" />
@@ -354,10 +371,29 @@ export default {
       </a>
       <p v-if="post.doc?.post_content">{{ post.doc.post_content }}</p>
 
+      <!-- Formulaire pour ajouter des médias -->
+      <div>
+        <label for="addMedia">Ajouter des médias</label>
+        <input
+          type="file"
+          id="addMedia"
+          multiple
+          @change="
+            (e) => {
+              const target = e.target as HTMLInputElement | null
+              if (target && target.files) {
+                addMediaToPost(post.id, target.files)
+              }
+            }
+          "
+        />
+      </div>
+
       <div v-if="post.doc && post.doc.media && post.doc.media.length > 0">
         <h3>Médias associés:</h3>
         <div v-for="(media, index) in post.doc.media" :key="index">
-          <img :src="media" alt="Media" width="100" />
+          <p>Nom : {{ media.name }} | Type : {{ media.type }} | Taille : {{ media.size }} bytes</p>
+          <img :src="media.url" alt="Media" width="100" />
           <button @click="removeMediaFromPost(post.id, index)">Supprimer le média</button>
         </div>
       </div>
@@ -397,6 +433,6 @@ button {
 
 .buttons {
   display: flex;
-  gap: 10px; /* Espace entre les boutons */
+  gap: 10px;
 }
 </style>
