@@ -158,7 +158,7 @@ export default {
     },
     //méthode generateFakeData pour générer des données factices
     async generateFakeData() {
-      const fakePosts = Array.from({ length: 10 }).map(() => ({
+      const fakePosts = Array.from({ length: 100 }).map(() => ({
         _id: Math.random().toString(36).substring(2),
         post_name: `Post_${Math.random().toString(36).substring(7)}`,
         post_content: `This is a fake post content for ${new Date().toISOString()}`,
@@ -344,11 +344,11 @@ export default {
 <template>
   <h1>Post</h1>
 
-  <form v-on:submit="createPost">
-    <label for="name">Name</label>
+  <form v-on:submit="createPost" class="posts">
+    <label for="name">Nom</label>
     <input type="text" id="name" name="name" v-model="name" />
 
-    <label for="content">Content</label>
+    <label for="content">Contenu</label>
     <textarea name="content" id="content" rows="5" v-model="content"></textarea>
 
     <label for="media">Ajouter un média</label>
